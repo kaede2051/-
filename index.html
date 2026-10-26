@@ -1,0 +1,458 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'">
+<meta name="referrer" content="no-referrer"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>地下耳育成計画</title>
+<style>
+:root{font-family:system-ui,-apple-system,"Segoe UI",sans-serif;color:#20242a;background:#f3f5f8}
+*{box-sizing:border-box}body{margin:0;padding:20px}.app{max-width:1000px;margin:auto}
+header,.panel{background:#fff;border:1px solid #e0e4ea;border-radius:16px;padding:20px;margin-bottom:16px}
+h1{margin:0 0 5px;font-size:1.8rem}h2{font-size:1.1rem;margin:0 0 14px}.muted{color:#667085;font-size:.9rem}
+.topline{display:flex;gap:12px;flex-wrap:wrap;align-items:center;justify-content:space-between}
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(135px,1fr));gap:10px}.stat{background:#f7f8fa;border-radius:12px;padding:12px}.stat-label{color:#667085;font-size:.85rem}.stat-value{font-size:1.25rem;font-weight:700;margin-top:4px}
+.stat.warn{background:#fff3f0;outline:1px solid #f0b8aa}.stat.warn .stat-value{color:#b3361b}
+.grid{display:grid;grid-template-columns:1.2fr .8fr;gap:16px}.actions{display:grid;grid-template-columns:repeat(auto-fit,minmax(165px,1fr));gap:9px}
+button,select,input{font:inherit}button{cursor:pointer;border:1px solid #ccd3dd;background:#fff;border-radius:10px;padding:11px;text-align:left;color:inherit}button:hover{background:#f0f4ff;border-color:#8298d8}button:disabled{opacity:.45;cursor:not-allowed}
+.action strong{display:block;margin-bottom:4px}.action small{display:block;color:#667085;line-height:1.4}.action .cost{display:block;font-size:.8rem;margin-top:7px;color:#455a89}.action .lack{display:block;font-size:.8rem;margin-top:4px;color:#b3361b}
+.log{list-style:none;padding:0;margin:0}.log li{padding:10px 0;border-bottom:1px solid #eceff2;line-height:1.5}.log li:last-child{border:0}
+.controls{display:flex;flex-wrap:wrap;gap:8px}.controls button{text-align:center}.notice{padding:12px;background:#f7f8fa;border-radius:10px;line-height:1.6}
+.relation{height:6px;background:#e5e8ee;border-radius:999px;margin-top:6px;overflow:hidden}
+.relation-fill{height:100%;background:#6c8cff;border-radius:999px;transition:width .3s}
+.stage-tag{font-size:.8rem;color:#34478a;background:#eef2ff;border-radius:999px;padding:2px 8px;margin-left:6px;font-weight:400}
+.battle-name{font-size:1.2rem;font-weight:700;margin:2px 0 6px}.battle-meta{display:flex;flex-wrap:wrap;gap:6px 16px;margin:8px 0;color:#455a89;font-size:.9rem}
+summary{cursor:pointer;font-weight:700;font-size:1.1rem}details[open] summary{margin-bottom:12px}
+.world-name{font-size:1.15rem;font-weight:700;margin:2px 0 4px}.action .bonus{display:block;font-size:.8rem;margin-top:4px;color:#2f7a4f}
+.achv-locked{opacity:.55}.achv-date{color:#455a89;font-size:.85rem}
+#ending .title{font-size:1.5rem;font-weight:700;margin:4px 0 8px}
+#ending ul{margin:8px 0 0;padding-left:20px;line-height:1.7}
+@media(max-width:720px){body{padding:10px}.grid{grid-template-columns:1fr}.panel,header{padding:15px}}
+</style></head>
+<body><main class="app">
+<header><h1>地下耳育成計画</h1><div class="muted">修行を重ねて、自分だけの成長を作ろう。</div></header>
+<section class="panel"><div class="topline"><div><h2 id="date">1年目・1月</h2><div class="muted">自分らしい成長を目指そう。</div></div><div><span class="muted">今月の行動回数　</span><strong id="turns">0 / 2</strong></div></div></section>
+<section class="panel"><h2>ステータス</h2><div class="stats" id="stats"></div></section>
+<section class="panel" id="world"></section>
+<section class="panel" id="battle" hidden></section>
+<section class="panel" id="ending" hidden></section>
+<div class="grid"><section class="panel"><h2>今月の行動</h2><p class="muted">1か月に2回まで行動できます（体力が20未満だと1回だけ）。行動を終えると翌月に進みます。</p><div class="actions" id="actions"></div><div class="controls" style="margin-top:12px"><button id="nextMonth">⏭ 月を終えて次へ</button></div><p class="muted" id="actionNote"></p></section>
+<section class="panel"><h2>記録</h2><ul class="log" id="log" aria-live="polite"></ul></section></div>
+<section class="panel"><h2 id="friendHead">フレンド</h2><p class="muted">行動のあとの突発イベントでフレンドが増えます（最大20人）。関係値が高い3人を表示します。</p><ul class="log" id="npcList"></ul></section>
+<section class="panel"><details id="achv"><summary id="achvSummary">実績</summary><ul class="log" id="achvList"></ul></details></section>
+<section class="panel"><h2>セーブデータ</h2><div class="controls"><button id="save">💾 セーブする</button><button id="load">📂 読み込む</button><button id="reset">↻ 最初から</button></div><p class="muted">セーブデータはこのブラウザ内に保存されます。別の端末やブラウザとは共有されません。</p></section>
+</main>
+<script>
+const SAVE_KEY="myLifeMimikoV1",SAVE_VERSION=1;
+const TOTAL_YEARS=3,MAX_LOG=60,MAX_MILESTONES=40;
+
+const clamp=n=>Math.max(0,Math.min(100,n));
+const STAT_MAX=300;   // 精度・速度・回避の上限（健康・体力は100）
+const clampS=n=>Math.max(0,Math.min(STAT_MAX,n));
+const maxOf=key=>(key==="accuracy"||key==="speed"||key==="dodge")?STAT_MAX:100;
+const rand=(min,max)=>Math.floor(Math.random()*(max-min+1))+min;
+const chance=p=>Math.random()<p;
+// 初期能力値：基本は30〜50、低確率（8%）で51〜65
+const initStat=()=>chance(.08)?rand(51,65):rand(30,50);
+
+// バッジ戦：diff は敵の強さ（精度・速度・回避の平均と比べる。能力の上限は300）、hp は参加時の健康減少、reward は勝利時に精度・速度・回避へ加わる値
+const TIERS=[
+ {name:"銅バッジ戦",short:"銅",diff:40,hp:4,reward:1},
+ {name:"銀バッジ戦",short:"銀",diff:74,hp:6,reward:2},
+ {name:"金バッジ戦",short:"金",diff:105,hp:8,reward:3},
+ {name:"ランクバッジ戦",short:"ランク",diff:142,hp:10,reward:4}
+];
+// フレンド候補（最大20人）。行動後の突発イベントで、ランダムに1人ずつフレンドになる
+// trait は性格タイプ。タイプごとに専用イベントがある
+const FRIENDS_MAX=20;
+const FRIEND_POOL=[
+ {name:"陽気なみみのこ",personality:"明るく社交的な",trait:"social",relation:35},
+ {name:"物静かなみみのこ",personality:"落ち着いていて観察好きな",trait:"observant",relation:25},
+ {name:"内気なみみのこ",personality:"創作が好きで少し人見知りな",trait:"shy",relation:20},
+ {name:"元気なみみのこ",personality:"体を動かすのが大好きな",trait:"energetic",relation:30},
+ {name:"マイペースなみみのこ",personality:"のんびり屋でマイペースな",trait:"easygoing",relation:25},
+ {name:"負けず嫌いなみみのこ",personality:"勝負事に熱くなりやすい",trait:"competitive",relation:20},
+ {name:"気まぐれなみみのこ",personality:"気分屋で行動が読めない",trait:"moody",relation:25},
+ {name:"世話好きなみみのこ",personality:"面倒見が良い",trait:"caring",relation:30},
+ {name:"几帳面なみみのこ",personality:"計画的で細かいところまで気を配る",trait:"meticulous",relation:25},
+ {name:"好奇心旺盛なみみのこ",personality:"新しいワールドが大好きな",trait:"curious",relation:30},
+ {name:"人懐っこいみみのこ",personality:"誰とでもすぐ仲良くなる",trait:"social",relation:30},
+ {name:"鋭いみみのこ",personality:"細かい変化によく気づく",trait:"observant",relation:25},
+ {name:"照れ屋なみみのこ",personality:"照れ屋でなかなか話しかけられない",trait:"shy",relation:20},
+ {name:"活発なみみのこ",personality:"じっとしていられない",trait:"energetic",relation:30},
+ {name:"穏やかなみみのこ",personality:"いつも穏やかでのんびりした",trait:"easygoing",relation:25},
+ {name:"熱血なみみのこ",personality:"熱くなりやすい勝負好きな",trait:"competitive",relation:20},
+ {name:"自由奔放なみみのこ",personality:"思いつきで動く",trait:"moody",relation:25},
+ {name:"優しいみみのこ",personality:"困っている人を放っておけない",trait:"caring",relation:30},
+ {name:"計画的なみみのこ",personality:"予定を立てるのが得意な",trait:"meticulous",relation:25},
+ {name:"冒険好きなみみのこ",personality:"まだ見ぬワールドを探すのが好きな",trait:"curious",relation:30}
+];
+
+// 今月のワールド：毎月ランダムで決まり、行動やイベントに特徴が出る
+// bonus: 行動ごとの上乗せ値 / friend: フレンドができる確率の上乗せ / battle: バッジ戦の勝率の上乗せ / rel: 関係値の上昇の上乗せ
+const WORLDS=[
+ {id:"shoot",name:"FPSワールド",desc:"狙いを磨ける。精密修行の精度上昇 +2。",bonus:{precision:2}},
+ {id:"race",name:"高速レースワールド",desc:"コースを駆け抜けて反射神経が鍛えられる。スティック操作の速度上昇 +2。",bonus:{stick:2}},
+ {id:"athletic",name:"アスレチックワールド",desc:"障害物を避ける練習にぴったり。柔軟トレーニングの回避上昇 +2。",bonus:{flex:2}},
+ {id:"quiet",name:"静かなチルワールド",desc:"落ち着ける空間。リラックスの体力回復 +6、体を休めるの健康回復 +5。",bonus:{chill:6,bodyrest:5}},
+ {id:"public",name:"賑やかなパブリックワールド",desc:"人が多く、フレンドができやすい（確率 +20%）。",friend:.2},
+ {id:"arena",name:"大会会場ワールド",desc:"熱気で力を出しやすい。バッジ戦の勝率 +5%。",battle:.05},
+ {id:"lounge",name:"フレンドの溜まり場ワールド",desc:"交流が深まりやすい。フレンドとの関係値の上昇 +3。",rel:3}
+];
+const BONUS_LABEL={precision:"精度",stick:"速度",flex:"回避",chill:"体力回復",bodyrest:"健康回復"};
+const newWorld=()=>rand(0,WORLDS.length-1);
+const curWorld=()=>WORLDS[s.world]||WORLDS[0];
+const wb=id=>(curWorld().bonus&&curWorld().bonus[id])||0;
+
+// 実績（称号）。test が null の実績は、バッジ戦の結果処理の中で個別に判定する
+const ACHIEVEMENTS=[
+ {id:"first_copper",name:"地下耳への第一歩",desc:"銅バッジを初めて獲得する",test:s=>s.badges[0].w>0},
+ {id:"first_silver",name:"一歩上への挑戦",desc:"銀バッジを初めて獲得する",test:s=>s.badges[1].w>0},
+ {id:"first_gold",name:"挑戦のその先へ",desc:"金バッジを初めて獲得する",test:s=>s.badges[2].w>0},
+ {id:"first_rank",name:"憧れの頂点に！",desc:"ランクバッジを初めて獲得する",test:s=>s.badges[3].w>0},
+ {id:"complete",name:"バッジコンプリート！",desc:"すべての種類のバッジを獲得する",test:s=>s.badges.every(b=>b.w>0)},
+ {id:"late_copper",name:"お前のような初耳がいるか",desc:"銅バッジより先に銀バッジ以上を獲得し、そのあとで銅バッジを初めて獲得する",test:null},
+ {id:"setsuna",name:"刹那の居合",desc:"精度が200以上になる",test:s=>s.accuracy>=200},
+ {id:"hayaki",name:"速きこと雷の如く",desc:"速度が200以上になる",test:s=>s.speed>=200},
+ {id:"washer",name:"回転式洗濯機",desc:"回避が200以上になる",test:s=>s.dodge>=200},
+ {id:"iai",name:"居合勢",desc:"精度が150以上になる",test:s=>s.accuracy>=150},
+ {id:"raiden",name:"迅雷勢",desc:"速度が150以上になる",test:s=>s.speed>=150},
+ {id:"kaihi",name:"回避勢",desc:"回避が150以上になる",test:s=>s.dodge>=150}
+];
+const newBattle=()=>({tier:rand(0,TIERS.length-1),status:"pending",result:""});
+const fresh=()=>({version:SAVE_VERSION,year:1,month:1,health:100,accuracy:initStat(),speed:initStat(),dodge:initStat(),energy:100,actions:0,badges:TIERS.map(()=>({w:0,t:0})),achievements:{},world:newWorld(),battle:newBattle(),
+ npcs:FRIEND_POOL.map(f=>({...f,known:false})),
+ log:["1年目の始まり。これからの成長は、あなたの選択次第だ。"],milestones:[]});
+let s=fresh();
+
+const names={health:"健康",accuracy:"精度",speed:"速度",dodge:"回避",energy:"体力"};
+const isOver=()=>s.year>TOTAL_YEARS;
+// 勝率：能力の平均と敵の強さの差で決まり、最後は運（乱数）で勝敗が決まる
+function winChance(tier){
+ const power=(s.accuracy+s.speed+s.dodge)/3;
+ return Math.max(.05,Math.min(.95,.5+(power-TIERS[tier].diff)/50+(curWorld().battle||0)));
+}
+
+function addLog(text,important){
+ s.log.unshift(text);if(s.log.length>MAX_LOG)s.log.length=MAX_LOG;
+ if(important){s.milestones.push(text);if(s.milestones.length>MAX_MILESTONES)s.milestones.shift()}
+}
+function maxActionsNow(){return s.energy<20?1:2}
+function relationStage(r){return r>=75?"親友":r>=45?"友人":"知人"}
+
+// eCost: 必要な体力
+const options=[
+{id:"precision",icon:"🎯",name:"精密修行",desc:"精度を伸ばす",cost:"体力 −5 / 精度 +5〜8 / 速度 −2",eCost:5,fn(){s.accuracy=clampS(s.accuracy+rand(5,8)+wb("precision"));s.speed=clampS(s.speed-2);s.energy=clamp(s.energy-5);return "精密修行に集中した。精度が上がったが、動きが少し慎重になり速度が落ちた。"}},
+{id:"stick",icon:"🕹️",name:"スティック操作",desc:"速度を伸ばす",cost:"体力 −5 / 速度 +4〜7 / 精度 −2",eCost:5,fn(){s.speed=clampS(s.speed+rand(4,7)+wb("stick"));s.accuracy=clampS(s.accuracy-2);s.energy=clamp(s.energy-5);return "スティック操作を反復した。速度が上がったが、狙いが少し雑になり精度が落ちた。"}},
+{id:"flex",icon:"🤸",name:"柔軟トレーニング",desc:"回避を伸ばす",cost:"体力 −10 / 回避 +4〜7",eCost:10,fn(){s.dodge=clampS(s.dodge+rand(4,7)+wb("flex"));s.energy=clamp(s.energy-10);return "柔軟トレーニングで体を限界まで動かした。回避が上がったが、ぐったり疲れた。"}},
+{id:"chill",icon:"🌿",name:"チルワールドでリラックス",desc:"体力をしっかり回復",cost:"体力 +18 / 健康 +4 / 精度・速度・回避 −1",fn(){s.energy=clamp(s.energy+18+wb("chill"));s.health=clamp(s.health+4);s.accuracy=clampS(s.accuracy-1);s.speed=clampS(s.speed-1);s.dodge=clampS(s.dodge-1);return "チルワールドでのんびり過ごし、元気を取り戻した。感覚が少しなまった。"}},
+{id:"bodyrest",icon:"🛌",name:"体を休める",desc:"健康を大きく回復",cost:"体力 +6 / 健康 +15 / 精度・速度・回避 −1",fn(){s.energy=clamp(s.energy+6);s.health=clamp(s.health+15+wb("bodyrest"));s.accuracy=clampS(s.accuracy-1);s.speed=clampS(s.speed-1);s.dodge=clampS(s.dodge-1);return "しっかり体を休めた。健康が大きく回復したが、感覚が少しなまった。"}}
+];
+function lackReason(o){return o.eCost&&s.energy<o.eCost?"体力が足りません":""}
+
+function render(){
+ checkAchievements();
+ const over=isOver();
+ document.getElementById("date").textContent=over?`${TOTAL_YEARS}年間を終えました`:`${s.year}年目・${s.month}月`;
+ document.getElementById("turns").textContent=`${s.actions} / ${maxActionsNow()}`;
+
+ const box=document.getElementById("stats");box.innerHTML="";
+ Object.entries(names).forEach(([key,label])=>{
+  const danger=(key==="energy"||key==="health")&&s[key]<20;
+  const el=document.createElement("div");el.className="stat"+(danger?" warn":"");
+  el.innerHTML=`<div class="stat-label"></div><div class="stat-value"></div>`;
+  el.querySelector(".stat-label").textContent=label+(danger?"（危険）":"");
+  el.querySelector(".stat-value").textContent=`${s[key]}/${maxOf(key)}`;box.appendChild(el);
+ });
+
+ const acts=document.getElementById("actions");acts.innerHTML="";
+ const limitReached=s.actions>=maxActionsNow();
+ options.forEach(o=>{
+  const lack=lackReason(o);
+  const b=document.createElement("button");b.className="action";
+  b.innerHTML=`<strong></strong><small></small><span class="cost"></span>`;
+  b.querySelector("strong").textContent=`${o.icon} ${o.name}`;
+  b.querySelector("small").textContent=o.desc;
+  b.querySelector(".cost").textContent=o.cost;
+  if(lack&&!limitReached&&!over){const l=document.createElement("span");l.className="lack";l.textContent=lack;b.appendChild(l)}
+  if(!over&&wb(o.id)){const bn=document.createElement("span");bn.className="bonus";bn.textContent=`ワールド効果：${BONUS_LABEL[o.id]} +${wb(o.id)}`;b.appendChild(bn)}
+  b.disabled=limitReached||over||!!lack;
+  b.addEventListener("click",()=>act(o.id));acts.appendChild(b);
+ });
+ const pending=!!(s.battle&&s.battle.status==="pending");
+ document.getElementById("nextMonth").disabled=over||pending;
+
+ let note;
+ if(over)note="修行の区切りを迎えました。下の「もう一度遊ぶ」から新しく始められます。";
+ else if(pending)note="今月のバッジ戦に参加するか決めると、翌月へ進めます。行動は先に選んでもかまいません。";
+ else if(limitReached)note="今月の行動を使い切りました。翌月へ進みましょう。";
+ else if(s.energy<20)note="体力が少なく、今月は1回しか行動できません。「チルワールドでリラックス」で体力を回復しましょう。";
+ else note="今月の行動を選んでください。行動しないまま月を進めることもできます。";
+ document.getElementById("actionNote").textContent=note;
+
+ const log=document.getElementById("log");log.innerHTML="";
+ s.log.slice(0,12).forEach(t=>{const li=document.createElement("li");li.textContent=t;log.appendChild(li)});
+ renderWorld();renderNPCs();renderBattle();renderAchievements();renderEnding();
+}
+
+function unlock(id){
+ const a=ACHIEVEMENTS.find(x=>x.id===id);if(!a||s.achievements[id])return;
+ const y=Math.min(s.year,TOTAL_YEARS);
+ s.achievements[id]={y,m:s.month};
+ addLog(`${y}年目${s.month}月：実績「${a.name}」を獲得した！`,true);
+}
+function checkAchievements(){ACHIEVEMENTS.forEach(a=>{if(a.test&&!s.achievements[a.id]&&a.test(s))unlock(a.id)})}
+function resolveBattle(join){
+ const b=s.battle;if(!b||b.status!=="pending"||isOver())return;
+ const t=TIERS[b.tier],when=`${s.year}年目${s.month}月：`;
+ if(!join){
+  b.status="skipped";b.result=`${t.name}は見送った。`;
+  addLog(when+b.result);render();return;
+ }
+ const win=chance(winChance(b.tier));
+ s.health=clamp(s.health-t.hp);
+ s.badges[b.tier].t++;
+ if(win){
+  // 銅バッジ未取得のまま銀以上を取っていて、初めて銅を取った場合
+  if(b.tier===0&&s.badges[0].w===0&&s.badges.slice(1).some(x=>x.w>0))unlock("late_copper");
+  s.badges[b.tier].w++;
+  s.accuracy=clampS(s.accuracy+t.reward);s.speed=clampS(s.speed+t.reward);s.dodge=clampS(s.dodge+t.reward);
+  b.result=`${t.name}に勝利して${t.short}バッジを獲得した！ 経験を積み、精度・速度・回避が+${t.reward}された。健康 −${t.hp}。`;
+  addLog(when+b.result,true);
+ }else{
+  b.result=`${t.name}に挑んだが、惜しくも敗れた。健康 −${t.hp}。`;
+  addLog(when+b.result);
+ }
+ b.status="done";render();
+}
+function renderBattle(){
+ const el=document.getElementById("battle"),b=s.battle;
+ if(!b||isOver()){el.hidden=true;el.innerHTML="";return}
+ const t=TIERS[b.tier];el.hidden=false;
+ el.innerHTML=`<h2>今月のバッジ戦</h2><div class="battle-name"></div><div class="battle-meta"></div><p class="notice"></p><div class="controls" style="margin-top:10px"></div><p class="muted record"></p>`;
+ el.querySelector(".battle-name").textContent=t.name;
+ const meta=el.querySelector(".battle-meta");
+ [`難易度：${"★".repeat(b.tier+1)}${"☆".repeat(TIERS.length-b.tier-1)}`,`勝率の目安：${Math.round(winChance(b.tier)*100)}%`,`参加すると健康 −${t.hp}`].forEach(x=>{const sp=document.createElement("span");sp.textContent=x;meta.appendChild(sp)});
+ const notice=el.querySelector(".notice"),ctr=el.querySelector(".controls");
+ if(b.status==="pending"){
+  notice.textContent="バッジ戦の知らせが届いた。精度・速度・回避の合計と運で勝敗が決まります。参加しますか？";
+  [["⚔️ 参加する",true],["🚪 見送る",false]].forEach(([label,join])=>{const bt=document.createElement("button");bt.textContent=label;bt.addEventListener("click",()=>resolveBattle(join));ctr.appendChild(bt)});
+ }else{notice.textContent=b.result;ctr.remove()}
+ el.querySelector(".record").textContent="戦績："+TIERS.map((x,i)=>`${x.short} ${s.badges[i].w}勝/${s.badges[i].t}戦`).join("　");
+}
+function renderWorld(){
+ const el=document.getElementById("world");
+ if(isOver()){el.hidden=true;el.innerHTML="";return}
+ const w=curWorld();el.hidden=false;
+ el.innerHTML=`<h2>今月のワールド</h2><div class="world-name"></div><div class="muted"></div>`;
+ el.querySelector(".world-name").textContent=w.name;
+ el.querySelector(".muted").textContent=w.desc;
+}
+function renderAchievements(){
+ const ul=document.getElementById("achvList");ul.innerHTML="";
+ const got=ACHIEVEMENTS.filter(a=>s.achievements[a.id]).length;
+ document.getElementById("achvSummary").textContent=`実績（${got}/${ACHIEVEMENTS.length}）`;
+ ACHIEVEMENTS.forEach(a=>{
+  const d=s.achievements[a.id];
+  const li=document.createElement("li");if(!d)li.className="achv-locked";
+  li.innerHTML=`<strong></strong><div class="muted"></div><div class="achv-date"></div>`;
+  li.querySelector("strong").textContent=(d?"🏅 ":"🔒 ")+a.name;
+  li.querySelector(".muted").textContent=a.desc;
+  li.querySelector(".achv-date").textContent=d?`獲得：${d.y}年目${d.m}月`:"未獲得";
+  ul.appendChild(li);
+ });
+}
+function renderNPCs(){
+ const ul=document.getElementById("npcList");ul.innerHTML="";
+ const known=s.npcs.filter(n=>n.known).sort((a,b)=>b.relation-a.relation);
+ document.getElementById("friendHead").textContent=`フレンド（${known.length}/${FRIENDS_MAX}人）`;
+ if(!known.length){const li=document.createElement("li");li.className="muted";li.textContent="まだフレンドはいません。行動のあとに、新しい出会いがあるかもしれません。";ul.appendChild(li);return}
+ known.slice(0,3).forEach(n=>{
+  const li=document.createElement("li");
+  li.innerHTML=`<strong></strong><span class="stage-tag"></span><div class="muted"></div><div class="relation"><div class="relation-fill"></div></div>`;
+  li.querySelector("strong").textContent=`${n.name} — ${n.relation}/100`;
+  li.querySelector(".stage-tag").textContent=relationStage(n.relation);
+  li.querySelector(".muted").textContent=n.personality.replace(/な$/,"");
+  li.querySelector(".relation-fill").style.width=n.relation+"%";
+  ul.appendChild(li);
+ });
+ if(known.length>3){const li=document.createElement("li");li.className="muted";li.textContent=`他に${known.length-3}人`;ul.appendChild(li)}
+}
+
+// ---- 突発イベント（VRChat風） ----
+const pick=arr=>arr[rand(0,arr.length-1)];
+// 関係値の変化（プラスのときは今月のワールドの上乗せがつく）
+const relChange=(n,v)=>{n.relation=clamp(n.relation+v+(v>0?(curWorld().rel||0):0))};
+function meetNewFriend(){
+ const pool=s.npcs.filter(x=>!x.known);
+ if(!pool.length||s.npcs.filter(x=>x.known).length>=FRIENDS_MAX)return "";
+ const n=pool[rand(0,pool.length-1)];
+ n.known=true;addLog(`${s.year}年目：${n.name}とフレンドになった。`,true);
+ const place=pick(["パブリックインスタンスで","練習ワールドで","イベントワールドで","ワールドの待ち合わせ場所で"]);
+ return `${place}${n.name}と出会い、フレンド申請を送り合った。${n.personality}タイプのようだ。`;
+}
+// フレンドの性格タイプごとの専用イベント
+const TRAIT_EVENTS={
+ social:n=>{relChange(n,6);const m=chance(.5)?meetNewFriend():"";return `${n.name}がパブリックの交流会に連れ出してくれた。顔が広く、周りの人とも話せた。`+(m?` さらに、${m}`:"")},
+ observant:n=>{relChange(n,5);s.accuracy=clampS(s.accuracy+2);return `${n.name}が動きの癖を静かに指摘してくれた。精度が上がった。`},
+ shy:n=>{relChange(n,8);return `${n.name}が勇気を出して話しかけてくれた。ようやくゆっくり話せた。`},
+ energetic:n=>{relChange(n,5);s.speed=clampS(s.speed+2);s.energy=clamp(s.energy-5);return `${n.name}にダンスワールドへ連れ出され、一緒に踊った。速度が上がったが、少し疲れた。`},
+ easygoing:n=>{relChange(n,4);s.energy=clamp(s.energy+8);return `${n.name}とのんびり雑談して、肩の力が抜けた。体力が回復した。`},
+ competitive:n=>{relChange(n,4);s.speed=clampS(s.speed+1);s.dodge=clampS(s.dodge+1);s.energy=clamp(s.energy-6);return `${n.name}に練習試合を挑まれ、全力で戦った。速度と回避が少し上がったが、体力を使った。`},
+ moody:n=>{if(chance(.6)){relChange(n,8);return `${n.name}が気まぐれに「今日は一緒に遊ぼう！」と誘ってくれた。楽しい時間を過ごした。`}relChange(n,-3);return `${n.name}に「やっぱり今日はやめる」と直前でドタキャンされた。気まぐれなのは仕方ない。`},
+ caring:n=>{relChange(n,5);s.health=clamp(s.health+6);return `${n.name}が体調を気遣って、のんびりしたワールドに誘ってくれた。健康が回復した。`},
+ meticulous:n=>{relChange(n,4);s.accuracy=clampS(s.accuracy+1);s.speed=clampS(s.speed+1);s.dodge=clampS(s.dodge+1);return `${n.name}が練習メニューを作ってくれた。精度・速度・回避が少し上がった。`},
+ curious:n=>{relChange(n,5);const k=pick([["accuracy","精度"],["speed","速度"],["dodge","回避"]]);s[k[0]]=clampS(s[k[0]]+2);return `${n.name}が珍しいワールドを教えてくれた。${k[1]}が上がった。`}
+};
+function traitEvent(n){const f=TRAIT_EVENTS[n.trait];return f?f(n):""}
+
+function eventMaybe(){
+ if(s.health<20&&chance(.5)){s.health=clamp(s.health-4);s.dodge=clampS(s.dodge-2);return "【突発イベント】長時間VRで遊びすぎて、VR酔いで寝込んでしまった。無理は禁物だ。"}
+ if(!chance(.38))return "";
+ const available=s.npcs.filter(n=>n.known);
+ const pickNpc=()=>available[rand(0,available.length-1)];
+ const pool=[
+ ()=>{s.dodge=clampS(s.dodge+2);return pick(["今日はトラッキングの調子が良く、体が思いどおりに動いた。回避が上がった。","ワールドの足場を軽やかに避けられた。回避が上がった。"])},
+ ()=>{s.health=clamp(s.health-4);return pick(["夜更かししてVRChatに入り浸ってしまい、少し体調を崩した。","ワールドの移動でVR酔いしてしまった。健康に気を配ろう。"])},
+ ()=>{s.speed=clampS(s.speed+2);return pick(["他のプレイヤーのスティック操作を見て真似してみた。速度が上がった。","動画で見たテクニックを試してみた。速度が上がった。"])},
+ ()=>{const n=pickNpc();if(!n)return "";relChange(n,6);s.dodge=clampS(s.dodge+1);return `${n.name}から「今ジョインできる？」とお誘いが来て、一緒に練習した。距離が縮まった。`},
+ ()=>{const n=pickNpc();if(!n)return "";relChange(n,-4);return pick([`${n.name}とボイスチャットで話が噛み合わず、少し気まずくなった。次に会ったときに話してみよう。`,`${n.name}の誘いを見逃してしまった。ひと言フォローしておきたい。`])},
+ ()=>{const n=pickNpc();if(!n)return "";return traitEvent(n)},
+ ()=>{const n=pickNpc();if(!n)return "";return traitEvent(n)}
+ ];
+ for(let tries=0;tries<4;tries++){const result=pool[rand(0,pool.length-1)]();if(result)return "【突発イベント】"+result}
+ return "";
+}
+function interactionEvent(){
+ const known=s.npcs.filter(n=>n.known);
+ // 行動後に、新しいフレンドができることがある（フレンドがいないうちは起きやすい。ワールドによっても変わる）
+ if(chance((known.length===0?.7:.35)+(curWorld().friend||0))){const m=meetNewFriend();if(m)return "【突発イベント】"+m}
+ const r=Math.random();
+ if(r<.6&&known.length){
+  const n=known[rand(0,known.length-1)];
+  // 半分は、そのフレンドの性格に合った専用イベント
+  if(chance(.5)){const e=traitEvent(n);if(e)return "【突発イベント】"+e}
+  const outcomes=[
+   ()=>{relChange(n,5);return `${n.name}と同じインスタンスに居合わせて、しばらく雑談した。関係が深まった。`},
+   ()=>{relChange(n,8);s.accuracy=clampS(s.accuracy+1);return `${n.name}に狙い方のコツを教わった。精度が上がり、前より信頼してくれた。`},
+   ()=>{relChange(n,-3);return `${n.name}と会話のタイミングがすれ違ってしまった。少し距離ができた。`}
+  ];
+  return "【突発イベント】"+outcomes[rand(0,outcomes.length-1)]();
+ }
+ if(r<.85){s.dodge=clampS(s.dodge+2);return "【突発イベント】練習ワールドでコツをつかみ、回避が上がった。"}
+ return "";
+}
+
+// ---- 行動・月送り ----
+function act(id){
+ if(isOver()||s.actions>=maxActionsNow())return;
+ const o=options.find(x=>x.id===id);if(!o||lackReason(o))return;
+ const result=o.fn();s.actions++;
+ let line=`${s.year}年目${s.month}月（${curWorld().name}）：${result}`;
+ if(chance(.28)){const e=interactionEvent();if(e)line+=" "+e}
+ addLog(line);render();
+}
+function advance(){
+ if(isOver()||(s.battle&&s.battle.status==="pending"))return;
+ let note=`${s.year}年目${s.month}月：翌月へ進んだ。`;
+ s.energy=clamp(s.energy+(s.health<20?2:5));
+ const e=eventMaybe();if(e)note+=" "+e;
+ addLog(note);
+ s.actions=0;s.month++;
+ if(s.month>12){
+  s.month=1;s.year++;
+  if(isOver())addLog(`${TOTAL_YEARS}年が経った。ここまでの修行を振り返ってみましょう。`,true);
+  else{
+   addLog(`${s.year}年目が始まる。`);
+   if(s.year===2)addLog(`${s.year}年目になった。ここまでの歩みを振り返ってみよう。`,true);
+  }
+ }
+ s.battle=isOver()?null:newBattle();
+ s.world=newWorld();
+ render();
+}
+
+// ---- エンディング ----
+function judgeTitle(){
+ const score={居合勢:Math.round(s.accuracy*100/STAT_MAX),迅雷勢:Math.round(s.speed*100/STAT_MAX),回避勢:Math.round(s.dodge*100/STAT_MAX)};
+ const entries=Object.entries(score).sort((a,b)=>b[1]-a[1]);
+ const top=entries[0],spread=top[1]-entries[entries.length-1][1];
+ if(spread<15)return {name:"オールラウンダー",text:"どの能力も満遍なく育てた、偏りのない成長でした。"};
+ const texts={居合勢:"狙いを外さない、一撃の精密さを磨き上げました。",迅雷勢:"誰よりも素早く動ける力を身につけました。",回避勢:"しなやかな動きで、攻撃をかわす力を磨きました。"};
+ return {name:top[0],text:texts[top[0]]};
+}
+function renderEnding(){
+ const el=document.getElementById("ending");
+ if(!isOver()){el.hidden=true;el.innerHTML="";return}
+ const t=judgeTitle();
+ el.hidden=false;el.innerHTML=`<h2></h2><div class="title"></div><p class="notice"></p><div class="stats" style="margin-top:12px"></div><h2 style="margin-top:16px">獲得した実績</h2><ul class="achv-end"></ul><h2 style="margin-top:16px">できごと</h2><ul class="events"></ul><div class="controls" style="margin-top:14px"><button id="again">🔁 もう一度遊ぶ</button></div>`;
+ el.querySelector("h2").textContent=`${TOTAL_YEARS}年間の振り返り`;
+ el.querySelector(".title").textContent=`称号：${t.name}`;
+ el.querySelector(".notice").textContent=t.text;
+ const stats=el.querySelector(".stats");
+ [...Object.entries(names).map(([k,l])=>[l,`${s[k]}/${maxOf(k)}`]),...TIERS.map((x,i)=>[`${x.short}バッジ`,`${s.badges[i].w}勝/${s.badges[i].t}戦`]),["フレンド",`${s.npcs.filter(n=>n.known).length}/${FRIENDS_MAX}人`],...s.npcs.filter(n=>n.known).sort((a,b)=>b.relation-a.relation).slice(0,3).map(n=>[`${n.name}との関係`,relationStage(n.relation)])].forEach(([l,v])=>{
+  const d=document.createElement("div");d.className="stat";d.innerHTML=`<div class="stat-label"></div><div class="stat-value"></div>`;
+  d.querySelector(".stat-label").textContent=l;d.querySelector(".stat-value").textContent=v;stats.appendChild(d);
+ });
+ const au=el.querySelector(".achv-end");
+ const earned=ACHIEVEMENTS.filter(a=>s.achievements[a.id]);
+ if(!earned.length){const li=document.createElement("li");li.textContent="今回は実績を獲得できませんでした。";au.appendChild(li)}
+ earned.forEach(a=>{const li=document.createElement("li");li.textContent=`🏅 ${a.name}（${s.achievements[a.id].y}年目${s.achievements[a.id].m}月）`;au.appendChild(li)});
+ const ul=el.querySelector(".events");
+ s.milestones.forEach(m=>{const li=document.createElement("li");li.textContent=m;ul.appendChild(li)});
+ el.querySelector("#again").addEventListener("click",()=>{s=fresh();render();window.scrollTo(0,0)});
+}
+
+// ---- セーブ・ロード ----
+// セーブデータは「信用しない入力」として扱い、必要な項目だけを取り出して型・範囲を検査し直す
+const SAVE_MAX_CHARS=200000;
+const num=(v,min,max,def)=>(typeof v==="number"&&Number.isFinite(v))?Math.max(min,Math.min(max,Math.round(v))):def;
+const str=(v,max)=>typeof v==="string"?v.slice(0,max):"";
+const strList=(v,maxItems,maxLen)=>Array.isArray(v)?v.filter(x=>typeof x==="string").slice(0,maxItems).map(x=>x.slice(0,maxLen)):[];
+function sanitizeSave(p){
+ if(!p||typeof p!=="object"||Array.isArray(p)||typeof p.year!=="number"||typeof p.accuracy!=="number")throw Error("invalid");
+ const base=fresh();
+ const out={
+  version:SAVE_VERSION,
+  year:num(p.year,1,TOTAL_YEARS+1,1),month:num(p.month,1,12,1),
+  health:num(p.health,0,100,base.health),energy:num(p.energy,0,100,base.energy),
+  accuracy:num(p.accuracy,0,STAT_MAX,base.accuracy),speed:num(p.speed,0,STAT_MAX,base.speed),dodge:num(p.dodge,0,STAT_MAX,base.dodge),
+  actions:num(p.actions,0,2,0)
+ };
+ // フレンド：名前が候補一覧と一致するものだけ採用（名前・性格は常にゲーム側の値を使う）
+ out.npcs=FRIEND_POOL.map(f=>{
+  const sv=Array.isArray(p.npcs)?p.npcs.find(x=>x&&typeof x==="object"&&x.name===f.name):null;
+  return {...f,relation:sv?num(sv.relation,0,100,f.relation):f.relation,known:!!(sv&&sv.known===true)};
+ });
+ out.badges=TIERS.map((_,i)=>{
+  const b=Array.isArray(p.badges)&&p.badges[i]&&typeof p.badges[i]==="object"?p.badges[i]:{};
+  const tr=num(b.t,0,999,0);return {t:tr,w:Math.min(tr,num(b.w,0,999,0))};
+ });
+ out.achievements={};
+ const sa=p.achievements&&typeof p.achievements==="object"&&!Array.isArray(p.achievements)?p.achievements:{};
+ ACHIEVEMENTS.forEach(a=>{
+  if(Object.prototype.hasOwnProperty.call(sa,a.id)&&sa[a.id]&&typeof sa[a.id]==="object")
+   out.achievements[a.id]={y:num(sa[a.id].y,1,TOTAL_YEARS,1),m:num(sa[a.id].m,1,12,1)};
+ });
+ out.world=(Number.isInteger(p.world)&&p.world>=0&&p.world<WORLDS.length)?p.world:newWorld();
+ out.log=strList(p.log,MAX_LOG,300);if(!out.log.length)out.log=base.log;
+ out.milestones=strList(p.milestones,MAX_MILESTONES,300);
+ const b=p.battle;
+ if(out.year>TOTAL_YEARS)out.battle=null;
+ else if(b&&typeof b==="object"&&Number.isInteger(b.tier)&&b.tier>=0&&b.tier<TIERS.length&&["pending","done","skipped"].includes(b.status))
+  out.battle={tier:b.tier,status:b.status,result:str(b.result,300)};
+ else out.battle=newBattle();
+ return out;
+}
+document.getElementById("nextMonth").addEventListener("click",advance);
+document.getElementById("save").addEventListener("click",()=>{try{localStorage.setItem(SAVE_KEY,JSON.stringify(s));alert("セーブしました。")}catch(e){alert("セーブできませんでした。ブラウザの設定を確認してください。")}});
+document.getElementById("load").addEventListener("click",()=>{
+ try{
+  const v=localStorage.getItem(SAVE_KEY);
+  if(!v){alert("セーブデータがありません。");return}
+  if(v.length>SAVE_MAX_CHARS)throw Error("too large");s=sanitizeSave(JSON.parse(v));render();alert("読み込みました。");
+ }catch(e){alert("データを読み込めませんでした。")}
+});
+document.getElementById("reset").addEventListener("click",()=>{if(confirm("最初からやり直しますか？ 保存済みデータは残ります。")){s=fresh();render()}});
+render();
+</script></body></html>
