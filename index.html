@@ -655,6 +655,14 @@ function judgeTitle(){
  const texts={居合勢:"狙いを外さない、一撃の精密さを磨き上げました。",迅雷勢:"誰よりも素早く動ける力を身につけました。",回避勢:"しなやかな動きで、攻撃をかわす力を磨きました。"};
  return {name:top[0],text:texts[top[0]]};
 }
+// シェア投稿に載せるゲームのURL。公開先が決まったらここに書く（例："https://example.com/mimiko/"）
+// 空のときは、Webで公開されているページならそのURLを自動で使う（ローカルファイルのときは載せない）
+const GAME_URL="https://kaede2051.github.io/-/";
+function shareUrl(){
+ if(/^https:\/\//.test(GAME_URL))return GAME_URL;
+ try{if(/^https?:$/.test(location.protocol))return location.origin+location.pathname}catch(e){}
+ return "";
+}
 // X（旧Twitter）シェア用の文章
 function shareText(t){
  const badges=TIERS.map((x,i)=>`${x.short}${s.badges[i].w}`).join(" ");
@@ -691,7 +699,8 @@ function renderEnding(){
  const ul=el.querySelector(".events");
  s.milestones.forEach(m=>{const li=document.createElement("li");setColored(li,m);ul.appendChild(li)});
  el.querySelector("#again").addEventListener("click",showTitle);
- el.querySelector("#shareX").href="https://twitter.com/intent/tweet?text="+encodeURIComponent(shareText(t));
+ const su=shareUrl();
+ el.querySelector("#shareX").href="https://twitter.com/intent/tweet?text="+encodeURIComponent(shareText(t))+(su?"&url="+encodeURIComponent(su):"");
 }
 
 // ---- セーブ・ロード ----
